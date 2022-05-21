@@ -38,8 +38,8 @@ function verifyJWT(req, res, next) {
 const emailClient = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "hmdradwanul@gmail.com",
-    pass: "bigbang123#",
+    user: process.env.EMAIL_SENDER,
+    pass: process.env.USER_PASS,
   },
 });
 
