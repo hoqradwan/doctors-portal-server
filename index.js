@@ -103,7 +103,7 @@ function sendPaymentConfirmationEmail(booking) {
     }
   });
 }
-
+ 
 async function run() {
   try {
     await client.connect();
