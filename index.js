@@ -35,7 +35,7 @@ function verifyJWT(req, res, next) {
   });
 }
 
-const emailClient = nodemailer.createTransport({
+let transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_SENDER,
@@ -65,11 +65,11 @@ function sendAppointmentEmail(booking) {
     `,
   };
 
-  emailClient.sendMail(email, function (err, info) {
+  transporter.sendMail(email, function (err, data) {
     if (err) {
       console.log(err);
     } else {
-      console.log("Message sent: ", info);
+      console.log("Message sent: ", data);
     }
   });
 }
