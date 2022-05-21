@@ -2,14 +2,18 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+var nodemailer = require("nodemailer");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
 const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.amurf.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.twtll.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
+
 const client = new MongoClient(uri, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -24,12 +28,82 @@ function verifyJWT(req, res, next) {
   const token = authHeader.split(" ")[1];
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, function (err, decoded) {
     if (err) {
-      return res.status(403).send({ message: "forbidden access" });
+      return res.status(403).send({ message: "Forbidden access" });
     }
     req.decoded = decoded;
     next();
   });
 }
+
+const emailClient = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "hmdradwanul@gmail.com",
+    pass: "bigbang123#",
+  },
+});
+
+function sendAppointmentEmail(booking) {
+  const { patient, patientName, treatment, date, slot } = booking;
+
+  var email = {
+    from: "hmdradwanul@gmail.com",
+    to: patient,
+    subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+    text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+    html: `
+      <div>
+        <p> Hello ${patientName}, </p>
+        <h3>Your Appointment for ${treatment} is confirmed</h3>
+        <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+        
+        <h3>Our Address</h3>
+        <p>Andor Killa Bandorban</p>
+        <p>Bangladesh</p>
+        <a href="https://web.programming-hero.com/">unsubscribe</a>
+      </div>
+    `,
+  };
+
+  emailClient.sendMail(email, function (err, info) {
+    if (err) {
+      console.log(err);
+    } else {
+      console.log("Message sent: ", info);
+    }
+  });
+}
+function sendPaymentConfirmationEmail(booking) {
+  const { patient, patientName, treatment, date, slot } = booking;
+
+  var email = {
+    from: process.env.EMAIL_SENDER,
+    to: patient,
+    subject: `We have received your payment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+    text: `Your payment for this Appointment ${treatment} is on ${date} at ${slot} is Confirmed`,
+    html: `
+      <div>
+        <p> Hello ${patientName}, </p>
+        <h3>Thank you for your payment . </h3>
+        <h3>We have received your payment</h3>
+        <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+        <h3>Our Address</h3>
+        <p>Andor Killa Bandorban</p>
+        <p>Bangladesh</p>
+        <a href="https://web.programming-hero.com/">unsubscribe</a>
+      </div>
+    `,
+  };
+
+  emailClient.sendMail(email, function (err, info) {
+    if (err) {
+      console.log(err);
+    } else {
+      console.log("Message sent: ", info);
+    }
+  });
+}
+
 async function run() {
   try {
     await client.connect();
@@ -41,6 +115,9 @@ async function run() {
       .collection("bookings");
     const userCollection = client.db("doctors_portal").collection("users");
     const doctorCollection = client.db("doctors_portal").collection("doctors");
+    const paymentCollection = client
+      .db("doctors_portal")
+      .collection("payments");
 
     const verifyAdmin = async (req, res, next) => {
       const requester = req.decoded.email;
@@ -54,12 +131,25 @@ async function run() {
       }
     };
 
+    app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+      const service = req.body;
+      const price = service.price;
+      const amount = price * 100;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+      res.send({ clientSecret: paymentIntent.client_secret });
+    });
+
     app.get("/service", async (req, res) => {
       const query = {};
       const cursor = serviceCollection.find(query).project({ name: 1 });
       const services = await cursor.toArray();
       res.send(services);
     });
+
     app.get("/user", verifyJWT, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -75,56 +165,71 @@ async function run() {
     app.put("/user/admin/:email", verifyJWT, verifyAdmin, async (req, res) => {
       const email = req.params.email;
       const filter = { email: email };
-      const updatedDoc = {
+      const updateDoc = {
         $set: { role: "admin" },
       };
-      const result = await userCollection.updateOne(filter, updatedDoc);
+      const result = await userCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
+
     app.put("/user/:email", async (req, res) => {
       const email = req.params.email;
       const user = req.body;
       const filter = { email: email };
       const options = { upsert: true };
-      const updatedDoc = {
+      const updateDoc = {
         $set: user,
       };
-      const result = await userCollection.updateOne(
-        filter,
-        updatedDoc,
-        options
-      );
+      const result = await userCollection.updateOne(filter, updateDoc, options);
       const token = jwt.sign(
         { email: email },
         process.env.ACCESS_TOKEN_SECRET,
-        { expiresIn: "1hr" }
+        { expiresIn: "1h" }
       );
       res.send({ result, token });
     });
+
+    // Warning: This is not the proper way to query multiple collection.
+    // After learning more about mongodb. use aggregate, lookup, pipeline, match, group
     app.get("/available", async (req, res) => {
       const date = req.query.date;
 
-      // step 1: get all services
+      // step 1:  get all services
       const services = await serviceCollection.find().toArray();
 
-      // step 2: get the booking of that day
+      // step 2: get the booking of that day. output: [{}, {}, {}, {}, {}, {}]
       const query = { date: date };
       const bookings = await bookingCollection.find(query).toArray();
 
-      // for each service, find bookings for that service
+      // step 3: for each service
       services.forEach((service) => {
+        // step 4: find bookings for that service. output: [{}, {}, {}, {}]
         const serviceBookings = bookings.filter(
           (book) => book.treatment === service.name
         );
+        // step 5: select slots for the service Bookings: ['', '', '', '']
         const bookedSlots = serviceBookings.map((book) => book.slot);
+        // step 6: select those slots that are not in bookedSlots
         const available = service.slots.filter(
           (slot) => !bookedSlots.includes(slot)
         );
-        // service.booked = serviceBookings.map((s) => s.slot);
+        //step 7: set available to slots to make it easier
         service.slots = available;
       });
+
       res.send(services);
     });
+
+    /**
+     * API Naming Convention
+     * app.get('/booking') // get all bookings in this collection. or get more than one or by filter
+     * app.get('/booking/:id') // get a specific booking
+     * app.post('/booking') // add a new booking
+     * app.patch('/booking/:id) //
+     * app.put('/booking/:id') // upsert ==> update (if exists) or insert (if doesn't exist)
+     * app.delete('/booking/:id) //
+     */
+
     app.get("/booking", verifyJWT, async (req, res) => {
       const patient = req.query.patient;
       const decodedEmail = req.decoded.email;
@@ -136,6 +241,14 @@ async function run() {
         return res.status(403).send({ message: "forbidden access" });
       }
     });
+
+    app.get("/booking/:id", verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: ObjectId(id) };
+      const booking = await bookingCollection.findOne(query);
+      res.send(booking);
+    });
+
     app.post("/booking", async (req, res) => {
       const booking = req.body;
       const query = {
@@ -148,33 +261,57 @@ async function run() {
         return res.send({ success: false, booking: exists });
       }
       const result = await bookingCollection.insertOne(booking);
-      res.send({ success: true, result });
+      console.log("sending email");
+      sendAppointmentEmail(booking);
+      return res.send({ success: true, result });
     });
 
-     
-    app.get('/doctor', verifyJWT, verifyAdmin, async(req, res)=>{
-        const doctors = await doctorCollection.find().toArray();
-        res.send(doctors)
-    })
+    app.patch("/booking/:id", verifyJWT, async (req, res) => {
+      const id = req.params.id;
+      const payment = req.body;
+      const filter = { _id: ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          paid: true,
+          transactionId: payment.transactionId,
+        },
+      };
+
+      const result = await paymentCollection.insertOne(payment);
+      const updatedBooking = await bookingCollection.updateOne(
+        filter,
+        updatedDoc
+      );
+      res.send(updatedBooking);
+    });
+
+    app.get("/doctor", verifyJWT, verifyAdmin, async (req, res) => {
+      const doctors = await doctorCollection.find().toArray();
+      res.send(doctors);
+    });
+
     app.post("/doctor", verifyJWT, verifyAdmin, async (req, res) => {
       const doctor = req.body;
       const result = await doctorCollection.insertOne(doctor);
       res.send(result);
     });
+
     app.delete("/doctor/:email", verifyJWT, verifyAdmin, async (req, res) => {
       const email = req.params.email;
-      const filter = {email: email}
+      const filter = { email: email };
       const result = await doctorCollection.deleteOne(filter);
       res.send(result);
     });
   } finally {
   }
 }
+
 run().catch(console.dir);
+
 app.get("/", (req, res) => {
-  res.send("Hello from doctor uncle!");
+  res.send("Hello From Doctor Uncle own portal!");
 });
 
 app.listen(port, () => {
-  console.log(`Doctor uncle listening on port ${port}`);
+  console.log(`Doctors App listening on port ${port}`);
 });
