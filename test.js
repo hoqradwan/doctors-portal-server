@@ -53,3 +53,48 @@ callPing();
 
   main().catch(console.error);
  */
+
+
+  // .......................................................
+  // final
+  /* 
+  
+  let transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_SENDER,
+    pass: process.env.USER_PASS,
+  },
+});
+
+function sendAppointmentEmail(booking) {
+  const { patient, patientName, treatment, date, slot } = booking;
+
+  var email = {
+    from: "hmdradwanul@gmail.com",
+    to: patient,
+    subject: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+    text: `Your Appointment for ${treatment} is on ${date} at ${slot} is Confirmed`,
+    html: `
+      <div>
+        <p> Hello ${patientName}, </p>
+        <h3>Your Appointment for ${treatment} is confirmed</h3>
+        <p>Looking forward to seeing you on ${date} at ${slot}.</p>
+        
+        <h3>Our Address</h3>
+        <p>Andor Killa Bandorban</p>
+        <p>Bangladesh</p>
+        <a href="https://web.programming-hero.com/">unsubscribe</a>
+      </div>
+    `,
+  };
+
+  transporter.sendMail(email, function (err, data) {
+    if (err) {
+      console.log(err);
+    } else {
+      console.log("Message sent: ", data);
+    }
+  });
+}
+  */
